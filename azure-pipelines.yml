@@ -1,72 +1,45 @@
 trigger:
   branches:
     include:
-      - staging  # Deploys on push
-pr:
-  branches:
-    include:
-      - qa       # Deploys on PR completion
-      - prod     # Deploys on PR completion
+      - staging
+      - qa
+      - prod
 
 pool:
-  name: azureagent
+  vmImage: ubuntu-latest
 
-variables:
-  VM_HOST: 20.244.4.16
-  VM_USERNAME: azureuser
-  APP_DIR: /home/azureuser/appnode
+steps:
+  - task: Bash@3
+    displayName: Deploy to VM on correct port
+    inputs:
+      targetType: 'inline'
+      script: |
+        echo "== Detecting branch =="
+        RAW_BRANCH="${BUILD_SOURCEBRANCH#refs/heads/}"
+        echo "Branch is: $RAW_BRANCH"
 
-stages:
-  - stage: Deploy
-    jobs:
-      - job: DeployToVM
-        steps:
-          - checkout: self
+        if [ "$RAW_BRANCH" = "staging" ]; then
+          PORT=3001
+        elif [ "$RAW_BRANCH" = "qa" ]; then
+          PORT=3002
+        elif [ "$RAW_BRANCH" = "prod" ]; then
+          PORT=3003
+        else
+          echo "❌ Unknown branch: $RAW_BRANCH"
+          exit 1
+        fi
 
-          - task: Bash@3
-            displayName: Deploy to VM on correct port
-            inputs:
-              targetType: inline
-              script: |
-                echo "== Detecting branch =="
-                BRANCH=$(Build.SourceBranchName)
-                echo "Branch is: $BRANCH"
+        echo "== Using port: $PORT =="
+        echo "== Cloning latest code =="
 
-                if [[ "$BRANCH" == "staging" ]]; then
-                  PORT=3001
-                elif [[ "$BRANCH" == "qa" ]]; then
-                  PORT=3002
-                elif [[ "$BRANCH" == "prod" ]]; then
-                  PORT=3003
-                else
-                  echo "❌ Unknown branch: $BRANCH"
-                  exit 1
-                fi
+        git pull origin $RAW_BRANCH
 
-                echo "== Using port: $PORT =="
-                echo "== Cloning latest code =="
+        echo "== Installing dependencies =="
+        npm install
 
-                mkdir -p $APP_DIR
-                cd $APP_DIR
+        echo "== (Optional) Building the app =="
+        npm run build
 
-                if [ -d ".git" ]; then
-                  git reset --hard
-                  git clean -fd
-                  git fetch origin
-                  git checkout $BRANCH
-                  git pull origin $BRANCH
-                else
-                  git clone -b $BRANCH https://github.com/raool1/appnode.git .
-                fi
-
-                echo "== Installing dependencies =="
-                npm install
-
-                echo "== Building (if build script exists) =="
-                npm run build || echo "No build step"
-
-                echo "== Starting app with PM2 =="
-                npm install -g pm2
-                pm2 stop app || true
-                PORT=$PORT pm2 start server.js --name app --update-env
-                pm2 save
+        echo "== Starting app with PM2 =="
+        pm2 delete all || true
+        pm2 start index.js --name "appnode" -- -p $PORT
