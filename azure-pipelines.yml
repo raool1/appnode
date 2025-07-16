@@ -1,0 +1,65 @@
+trigger:
+  branches:
+    include:
+      - staging
+      - qa
+      - prod
+
+variables:
+  vm_host: "20.244.4.16"
+  vm_user: "azureuser"
+  deploy_path: "/home/azureuser/appnode"
+  repo_url: "https://github.com/raool1/appnode.git"
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Deploy
+  jobs:
+  - job: DeployToVM
+    steps:
+    - task: InstallSSHKey@0
+      inputs:
+        sshPublicKey: ''
+        sshKeySecureFile: 'node-app_key.pem'  # 👈 Match the file name you uploaded
+        knownHostsEntry: '20.244.4.16'
+
+    - task: SSH@0
+      inputs:
+        sshEndpoint: ''
+        runOptions: inline
+        inline: |
+          set -e
+
+          BRANCH=$(Build.SourceBranchName)
+          echo "Deploying branch: $BRANCH"
+
+          PORT=0
+          if [ "$BRANCH" = "staging" ]; then
+            PORT=3001
+          elif [ "$BRANCH" = "qa" ]; then
+            PORT=3002
+          elif [ "$BRANCH" = "prod" ]; then
+            PORT=3003
+          else
+            echo "Unknown branch $BRANCH"
+            exit 1
+          fi
+
+          echo "Using port $PORT"
+
+          if [ ! -d "$(deploy_path)" ]; then
+            git clone $repo_url $(deploy_path)
+          fi
+
+          cd $(deploy_path)
+          git fetch origin $BRANCH
+          git checkout $BRANCH
+          git pull origin $BRANCH
+
+          npm install
+          npm run build
+
+          export PORT=$PORT
+          pm2 startOrRestart server.js --name "appnode-$BRANCH" --update-env
