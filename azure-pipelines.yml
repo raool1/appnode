@@ -39,8 +39,12 @@ steps:
         fi
 
         echo "== Using PORT: $PORT and PM2 process name: $PM2_NAME =="
-        echo "== Pulling latest code from branch: $RAW_BRANCH =="
-        git pull origin $RAW_BRANCH
+        
+        APP_DIR="/home/azureuser/${RAW_BRANCH}-app"
+        echo "== Cloning $RAW_BRANCH into $APP_DIR =="
+        rm -rf $APP_DIR
+        git clone -b $RAW_BRANCH https://github.com/raool1/appnode $APP_DIR
+        cd $APP_DIR
 
         echo "== Installing dependencies =="
         npm install
@@ -53,3 +57,4 @@ steps:
         PORT=$PORT pm2 start server.js --name "$PM2_NAME"
 
         echo "✅ Deployment finished for $RAW_BRANCH on port $PORT"
+
