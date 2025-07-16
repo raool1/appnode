@@ -1,59 +1,72 @@
 trigger:
   branches:
     include:
-      - staging
-      - qa
-      - prod
-
-variables:
-  deploy_path: "/home/azureuser/appnode"
-  repo_url: "https://github.com/raool1/appnode.git"
+      - staging  # Deploys on push
+pr:
+  branches:
+    include:
+      - qa       # Deploys on PR completion
+      - prod     # Deploys on PR completion
 
 pool:
-  name: azureagent   # 👈 Your self-hosted agent name
+  name: azureagent
+
+variables:
+  VM_HOST: 20.244.4.16
+  VM_USERNAME: azureuser
+  APP_DIR: /home/azureuser/appnode
 
 stages:
-- stage: Deploy
-  jobs:
-  - job: DeployToVM
-    steps:
-    - script: |
-        echo "== Deploying branch: $(Build.SourceBranchName) =="
+  - stage: Deploy
+    jobs:
+      - job: DeployToVM
+        steps:
+          - checkout: self
 
-        BRANCH=$(Build.SourceBranchName)
+          - task: Bash@3
+            displayName: Deploy to VM on correct port
+            inputs:
+              targetType: inline
+              script: |
+                echo "== Detecting branch =="
+                BRANCH=$(Build.SourceBranchName)
+                echo "Branch is: $BRANCH"
 
-        # Choose port based on branch
-        if [ "$BRANCH" = "staging" ]; then
-          PORT=3001
-        elif [ "$BRANCH" = "qa" ]; then
-          PORT=3002
-        elif [ "$BRANCH" = "prod" ]; then
-          PORT=3003
-        else
-          echo "Unknown branch. Exiting."
-          exit 1
-        fi
+                if [[ "$BRANCH" == "staging" ]]; then
+                  PORT=3001
+                elif [[ "$BRANCH" == "qa" ]]; then
+                  PORT=3002
+                elif [[ "$BRANCH" == "prod" ]]; then
+                  PORT=3003
+                else
+                  echo "❌ Unknown branch: $BRANCH"
+                  exit 1
+                fi
 
-        echo "== Using port: $PORT =="
+                echo "== Using port: $PORT =="
+                echo "== Cloning latest code =="
 
-        # Clone or update code
-        if [ ! -d "$(deploy_path)" ]; then
-          git clone $(repo_url) $(deploy_path)
-        fi
+                mkdir -p $APP_DIR
+                cd $APP_DIR
 
-        cd $(deploy_path)
-        git fetch origin $BRANCH
-        git checkout $BRANCH
-        git pull origin $BRANCH
+                if [ -d ".git" ]; then
+                  git reset --hard
+                  git clean -fd
+                  git fetch origin
+                  git checkout $BRANCH
+                  git pull origin $BRANCH
+                else
+                  git clone -b $BRANCH https://github.com/raool1/appnode.git .
+                fi
 
-        echo "== Installing dependencies =="
-        npm install
+                echo "== Installing dependencies =="
+                npm install
 
-        echo "== (Optional) Build step =="
-        npm run build || echo "Skipping build step (no build script)"
+                echo "== Building (if build script exists) =="
+                npm run build || echo "No build step"
 
-        echo "== Starting app with PM2 =="
-        export PORT=$PORT
-        pm2 startOrRestart server.js --name "appnode-$BRANCH" --update-env
-
-      displayName: 'Deploy to VM on correct port'
+                echo "== Starting app with PM2 =="
+                npm install -g pm2
+                pm2 stop app || true
+                PORT=$PORT pm2 start server.js --name app --update-env
+                pm2 save
