@@ -1,60 +1,72 @@
 trigger:
   branches:
     include:
-      - prod
-      - qa
-      - staging
+      - staging  # Deploys on push
+pr:
+  branches:
+    include:
+      - qa       # Deploys on PR completion
+      - prod     # Deploys on PR completion
 
 pool:
   name: azureagent
 
-jobs:
-- job: DeployToVM
-  displayName: "Deploy based on branch"
-  steps:
-    - checkout: self
+variables:
+  VM_HOST: 20.244.4.16
+  VM_USERNAME: azureuser
+  APP_DIR: /home/azureuser/appnode
 
-    - task: Bash@3
-      displayName: "Deploy to VM on correct port"
-      inputs:
-        targetType: 'inline'
-        script: |
-          echo "== Detecting branch =="
-          BRANCH="$(Build.SourceBranchName)"
-          echo "Branch is: $BRANCH"
+stages:
+  - stage: Deploy
+    jobs:
+      - job: DeployToVM
+        steps:
+          - checkout: self
 
-          if [[ "$BRANCH" == "refs/heads/staging" ]]; then
-            PORT=3001
-            APPNAME="appnode-staging"
-          elif [[ "$BRANCH" == "refs/heads/qa" ]]; then
-            PORT=3002
-            APPNAME="appnode-qa"
-          elif [[ "$BRANCH" == "refs/heads/prod" ]]; then
-            PORT=3003
-            APPNAME="appnode-prod"
-          else
-            echo "❌ Unknown branch: $BRANCH"
-            exit 1
-          fi
+          - task: Bash@3
+            displayName: Deploy to VM on correct port
+            inputs:
+              targetType: inline
+              script: |
+                echo "== Detecting branch =="
+                BRANCH=$(Build.SourceBranchName)
+                echo "Branch is: $BRANCH"
 
-          echo "== Using port: $PORT and app name: $APPNAME =="
+                if [[ "$BRANCH" == "staging" ]]; then
+                  PORT=3001
+                elif [[ "$BRANCH" == "qa" ]]; then
+                  PORT=3002
+                elif [[ "$BRANCH" == "prod" ]]; then
+                  PORT=3003
+                else
+                  echo "❌ Unknown branch: $BRANCH"
+                  exit 1
+                fi
 
-          cd /home/azureuser/appnode
+                echo "== Using port: $PORT =="
+                echo "== Cloning latest code =="
 
-          echo "== Pulling latest code =="
-          git fetch origin
-          git reset --hard
-          git checkout ${BRANCH#refs/heads/}
-          git pull origin ${BRANCH#refs/heads/}
+                mkdir -p $APP_DIR
+                cd $APP_DIR
 
-          echo "== Installing dependencies =="
-          npm install
+                if [ -d ".git" ]; then
+                  git reset --hard
+                  git clean -fd
+                  git fetch origin
+                  git checkout $BRANCH
+                  git pull origin $BRANCH
+                else
+                  git clone -b $BRANCH https://github.com/raool1/appnode.git .
+                fi
 
-          echo "== Building app =="
-          npm run build || echo "⚠️ Skipping build (if not needed)"
+                echo "== Installing dependencies =="
+                npm install
 
-          echo "== Restarting app with PM2 =="
-          pm2 delete $APPNAME || true
-          PORT=$PORT pm2 start server.js --name "$APPNAME"
+                echo "== Building (if build script exists) =="
+                npm run build || echo "No build step"
 
-          echo "✅ Deployment complete: $APPNAME running on port $PORT"
+                echo "== Starting app with PM2 =="
+                npm install -g pm2
+                pm2 stop app || true
+                PORT=$PORT pm2 start server.js --name app --update-env
+                pm2 save
