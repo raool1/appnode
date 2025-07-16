@@ -5,6 +5,12 @@ trigger:
       - qa
       - prod
 
+pr:
+  branches:
+    include:
+      - qa
+      - prod
+
 pool:
   name: azureagent
 
@@ -20,26 +26,30 @@ steps:
 
         if [ "$RAW_BRANCH" = "staging" ]; then
           PORT=3001
+          PM2_NAME="appnode-staging"
         elif [ "$RAW_BRANCH" = "qa" ]; then
           PORT=3002
+          PM2_NAME="appnode-qa"
         elif [ "$RAW_BRANCH" = "prod" ]; then
           PORT=3003
+          PM2_NAME="appnode-prod"
         else
           echo "❌ Unknown branch: $RAW_BRANCH"
           exit 1
         fi
 
-        echo "== Using port: $PORT =="
-        echo "== Cloning latest code =="
-
+        echo "== Using PORT: $PORT and PM2 process name: $PM2_NAME =="
+        echo "== Pulling latest code from branch: $RAW_BRANCH =="
         git pull origin $RAW_BRANCH
 
         echo "== Installing dependencies =="
         npm install
 
-        echo "== (Optional) Building the app =="
+        echo "== Building the app =="
         npm run build
 
         echo "== Starting app with PM2 =="
-        pm2 delete all || true
-        pm2 start server.js --name "appnode" -- -p $PORT
+        pm2 delete "$PM2_NAME" || true
+        PORT=$PORT pm2 start server.js --name "$PM2_NAME"
+
+        echo "✅ Deployment finished for $RAW_BRANCH on port $PORT"
