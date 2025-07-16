@@ -1,0 +1,59 @@
+trigger:
+  branches:
+    include:
+      - staging
+      - qa
+      - prod
+
+variables:
+  deploy_path: "/home/azureuser/appnode"
+  repo_url: "https://github.com/raool1/appnode.git"
+
+pool:
+  name: azureagent   # 👈 Your self-hosted agent name
+
+stages:
+- stage: Deploy
+  jobs:
+  - job: DeployToVM
+    steps:
+    - script: |
+        echo "== Deploying branch: $(Build.SourceBranchName) =="
+
+        BRANCH=$(Build.SourceBranchName)
+
+        # Choose port based on branch
+        if [ "$BRANCH" = "staging" ]; then
+          PORT=3001
+        elif [ "$BRANCH" = "qa" ]; then
+          PORT=3002
+        elif [ "$BRANCH" = "prod" ]; then
+          PORT=3003
+        else
+          echo "Unknown branch. Exiting."
+          exit 1
+        fi
+
+        echo "== Using port: $PORT =="
+
+        # Clone or update code
+        if [ ! -d "$(deploy_path)" ]; then
+          git clone $(repo_url) $(deploy_path)
+        fi
+
+        cd $(deploy_path)
+        git fetch origin $BRANCH
+        git checkout $BRANCH
+        git pull origin $BRANCH
+
+        echo "== Installing dependencies =="
+        npm install
+
+        echo "== (Optional) Build step =="
+        npm run build || echo "Skipping build step (no build script)"
+
+        echo "== Starting app with PM2 =="
+        export PORT=$PORT
+        pm2 startOrRestart server.js --name "appnode-$BRANCH" --update-env
+
+      displayName: 'Deploy to VM on correct port'
