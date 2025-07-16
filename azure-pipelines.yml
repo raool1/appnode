@@ -1,59 +1,60 @@
 trigger:
   branches:
     include:
-      - staging
-      - qa
       - prod
-
-variables:
-  deploy_path: "/home/azureuser/appnode"
-  repo_url: "https://github.com/raool1/appnode.git"
+      - qa
+      - staging
 
 pool:
-  name: azureagent   # 👈 Your self-hosted agent name
+  name: azureagent
 
-stages:
-- stage: Deploy
-  jobs:
-  - job: DeployToVM
-    steps:
-    - script: |
-        echo "== Deploying branch: $(Build.SourceBranchName) =="
+jobs:
+- job: DeployToVM
+  displayName: "Deploy based on branch"
+  steps:
+    - checkout: self
 
-        BRANCH=$(Build.SourceBranchName)
+    - task: Bash@3
+      displayName: "Deploy to VM on correct port"
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "== Detecting branch =="
+          BRANCH="$(Build.SourceBranchName)"
+          echo "Branch is: $BRANCH"
 
-        # Choose port based on branch
-        if [ "$BRANCH" = "staging" ]; then
-          PORT=3001
-        elif [ "$BRANCH" = "qa" ]; then
-          PORT=3002
-        elif [ "$BRANCH" = "prod" ]; then
-          PORT=3003
-        else
-          echo "Unknown branch. Exiting."
-          exit 1
-        fi
+          if [[ "$BRANCH" == "refs/heads/staging" ]]; then
+            PORT=3001
+            APPNAME="appnode-staging"
+          elif [[ "$BRANCH" == "refs/heads/qa" ]]; then
+            PORT=3002
+            APPNAME="appnode-qa"
+          elif [[ "$BRANCH" == "refs/heads/prod" ]]; then
+            PORT=3003
+            APPNAME="appnode-prod"
+          else
+            echo "❌ Unknown branch: $BRANCH"
+            exit 1
+          fi
 
-        echo "== Using port: $PORT =="
+          echo "== Using port: $PORT and app name: $APPNAME =="
 
-        # Clone or update code
-        if [ ! -d "$(deploy_path)" ]; then
-          git clone $(repo_url) $(deploy_path)
-        fi
+          cd /home/azureuser/appnode
 
-        cd $(deploy_path)
-        git fetch origin $BRANCH
-        git checkout $BRANCH
-        git pull origin $BRANCH
+          echo "== Pulling latest code =="
+          git fetch origin
+          git reset --hard
+          git checkout ${BRANCH#refs/heads/}
+          git pull origin ${BRANCH#refs/heads/}
 
-        echo "== Installing dependencies =="
-        npm install
+          echo "== Installing dependencies =="
+          npm install
 
-        echo "== (Optional) Build step =="
-        npm run build || echo "Skipping build step (no build script)"
+          echo "== Building app =="
+          npm run build || echo "⚠️ Skipping build (if not needed)"
 
-        echo "== Starting app with PM2 =="
-        export PORT=$PORT
-        pm2 startOrRestart server.js --name "appnode-$BRANCH" --update-env
+          echo "== Restarting app with PM2 =="
+          pm2 delete $APPNAME || true
+          PORT=$PORT pm2 start server.js --name "$APPNAME"
 
-      displayName: 'Deploy to VM on correct port'
+          echo "✅ Deployment complete: $APPNAME running on port $PORT"
