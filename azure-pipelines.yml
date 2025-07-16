@@ -5,6 +5,12 @@ trigger:
       - qa
       - prod
 
+pr:
+  branches:
+    include:
+      - qa
+      - prod
+
 pool:
   name: azureagent
 
