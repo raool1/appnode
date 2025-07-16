@@ -42,4 +42,4 @@ steps:
 
         echo "== Starting app with PM2 =="
         pm2 delete all || true
-        pm2 start index.js --name "appnode" -- -p $PORT
+        pm2 start server.js --name "appnode" -- -p $PORT
