@@ -1,13 +1,12 @@
 const express = require('express');
-const path = require('path');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(express.static(path.join(__dirname, 'build')));
+// ✅ Serve static files or views from current directory (branch-specific)
+app.use(express.static(__dirname + '/public'));
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
 });
 
 app.listen(PORT, () => {
